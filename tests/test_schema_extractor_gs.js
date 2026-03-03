@@ -5,6 +5,7 @@ const {
   buildSchemaFromRows,
   parseDatabases,
   buildJdbcUrl,
+  buildClickHouseHttpUrl,
   getDefaultAccountQuery,
   flattenMetadataRows
 } = require('../schema_extractor.gs');
@@ -56,10 +57,15 @@ const {
   const pgUrl = buildJdbcUrl({ host: 'db.local', port: '5432', driver: 'postgres' }, 'analytics');
   assert.strictEqual(pgUrl, 'jdbc:postgresql://db.local:5432/analytics');
 
-  const chUrl = buildJdbcUrl({ host: 'ch.local', port: '8123', driver: 'clickhouse' }, 'warehouse');
-  assert.strictEqual(chUrl, 'jdbc:clickhouse://ch.local:8123/warehouse');
+  const chHttp = buildClickHouseHttpUrl({ host: 'ch.local', port: '8123', protocol: 'http' }, 'warehouse');
+  assert.strictEqual(chHttp, 'http://ch.local:8123/?database=warehouse');
 
   assert.strictEqual(getDefaultAccountQuery('clickhouse'), 'SELECT currentUser() AS account');
+
+  assert.throws(
+    () => buildJdbcUrl({ host: 'ch.local', port: '8123', driver: 'clickhouse' }, 'warehouse'),
+    /ClickHouse không dùng Jdbc/
+  );
 })();
 
 (function testFlattenMetadataRows() {

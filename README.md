@@ -17,24 +17,24 @@ Chạy hàm `setupConfigSheet()` hoặc mở file sheet để menu tự tạo. S
 - `user`
 - `pass`
 - `driver` (`mysql`, `postgres`, `clickhouse`)
+- `protocol` (`http` hoặc `https`, dùng cho ClickHouse)
 - `account_query` (để trống sẽ tự dùng default theo driver)
 
-### Cấu hình ClickHouse
+## 2) Cấu hình ClickHouse (khắc phục lỗi unsupported JDBC protocol)
+
+Apps Script `Jdbc` **không hỗ trợ** `jdbc:clickhouse://...`, vì vậy tool này dùng **ClickHouse HTTP API** (`UrlFetchApp`) cho driver `clickhouse`.
 
 Ví dụ config:
 
-- `host`: `127.0.0.1`
+- `host`: `103.104.xxx.xxx`
 - `port`: `8123` (hoặc `8443` nếu SSL)
-- `databases`: `default,analytics`
-- `user`: `default`
-- `pass`: `<password>`
+- `databases`: `kfm_scm,kdb`
+- `user`: `scm_iam`
+- `pass`: `***`
 - `driver`: `clickhouse`
+- `protocol`: `http`
 
-JDBC URL sẽ tự dựng dạng:
-
-`jdbc:clickhouse://<host>:<port>/<database>`
-
-## 2) Nút hàm / menu để chạy
+## 3) Nút hàm / menu để chạy
 
 Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh:
 
@@ -46,21 +46,21 @@ Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh
 
 > Có thể gán các hàm này vào button (Insert → Drawing → Assign script).
 
-## 3) Output sheets
+## 4) Output sheets
 
 - `account_output!A1`: JSON account lấy từ DB
 - `schema_output!A1`: JSON metadata schema
 - `metadata_tables`: bảng metadata dạng phẳng để filter/tra cứu
 - `json_import!A1`: nơi dán JSON để chạy `updateMetadataFromJson()`
 
-## 4) Lưu kết quả vào file JSON
+## 5) Lưu kết quả vào file JSON
 
 Chạy `saveMetadataJsonToDrive()` để tạo file:
 
 - Tên file: `schema_metadata_<timestamp>.json`
 - Vị trí: Google Drive của tài khoản chạy script
 
-## 5) Parse SQL thủ công từ sheet `sql_input`
+## 6) Parse SQL thủ công từ sheet `sql_input`
 
 Nếu không kết nối DB, bạn vẫn có thể nhập SQL vào `sql_input`:
 
@@ -69,16 +69,10 @@ Nếu không kết nối DB, bạn vẫn có thể nhập SQL vào `sql_input`:
 
 và chạy `extractSchemaToSheet()` để sinh metadata JSON.
 
-## Lưu ý ClickHouse
-
-- Hàm lấy schema DB dùng `system.tables` và `system.columns`.
-- `table_constraints` sẽ lưu thông tin `ENGINE ...` của bảng ClickHouse.
-- `relationships` với ClickHouse mặc định để rỗng vì thường không dùng FK như OLTP DB.
-
 ## Test local parser/helpers (Node.js)
 
 ```bash
 node tests/test_schema_extractor_gs.js
 ```
 
-> Test local chỉ kiểm tra hàm JS thuần. Các hàm `SpreadsheetApp`, `Jdbc`, `DriveApp` cần chạy trong Apps Script runtime.
+> Test local chỉ kiểm tra hàm JS thuần. Các hàm `SpreadsheetApp`, `Jdbc`, `DriveApp`, `UrlFetchApp` cần chạy trong Apps Script runtime.

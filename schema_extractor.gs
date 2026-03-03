@@ -30,11 +30,12 @@ function setupConfigSheet() {
   const headers = [
     ['key', 'value', 'note'],
     ['host', '127.0.0.1', 'DB host'],
-    ['port', '3306', 'MySQL=3306, Postgres=5432, ClickHouse=8123/8443'],
-    ['databases', 'db1,db2', 'Danh sách DB, phân tách bằng dấu phẩy'],
+    ['port', '8123', 'MySQL=3306, Postgres=5432, ClickHouse HTTP=8123/8443'],
+    ['databases', 'default', 'Danh sách DB, phân tách bằng dấu phẩy'],
     ['user', 'default', 'DB user'],
     ['pass', '', 'DB password'],
     ['driver', 'clickhouse', 'mysql | postgres | clickhouse'],
+    ['protocol', 'http', 'http | https (cho clickhouse HTTP API)'],
     ['account_query', '', 'Để trống để dùng default theo driver']
   ];
 
@@ -89,10 +90,11 @@ function parseColumnDef(raw) {
     idx += 1;
   }
 
+  const constraintText = tokens.slice(idx).join(' ').trim();
   return {
     name,
     data_type: typeTokens.join(' ').trim() || 'UNKNOWN',
-    constraints: tokens.slice(idx).join(' ').trim() ? [tokens.slice(idx).join(' ').trim()] : []
+    constraints: constraintText ? [constraintText] : []
   };
 }
 
@@ -179,15 +181,20 @@ function buildJdbcUrl(config, databaseName) {
 
   const driver = getDriver(config);
   if (driver === 'postgres') {
-    const port = config.port || '5432';
-    return `jdbc:postgresql://${host}:${port}/${databaseName}`;
+    return `jdbc:postgresql://${host}:${config.port || '5432'}/${databaseName}`;
   }
-  if (driver === 'clickhouse') {
-    const port = config.port || '8123';
-    return `jdbc:clickhouse://${host}:${port}/${databaseName}`;
+  if (driver === 'mysql') {
+    return `jdbc:mysql://${host}:${config.port || '3306'}/${databaseName}`;
   }
-  const port = config.port || '3306';
-  return `jdbc:mysql://${host}:${port}/${databaseName}`;
+  throw new Error('ClickHouse không dùng Jdbc service của Apps Script. Dùng HTTP API.');
+}
+
+function buildClickHouseHttpUrl(config, databaseName) {
+  const host = config.host;
+  if (!host) throw new Error("Config thiếu 'host'.");
+  const protocol = String(config.protocol || 'http').toLowerCase();
+  const port = config.port || (protocol === 'https' ? '8443' : '8123');
+  return `${protocol}://${host}:${port}/?database=${encodeURIComponent(databaseName)}`;
 }
 
 function getDefaultAccountQuery(driver) {
@@ -218,6 +225,39 @@ function readSingleValueQuery(conn, sql) {
   return value;
 }
 
+function clickhouseQueryRows(config, databaseName, sql) {
+  const url = buildClickHouseHttpUrl(config, databaseName);
+  const query = `${sql}\nFORMAT JSONEachRow`;
+
+  const options = {
+    method: 'post',
+    payload: query,
+    muteHttpExceptions: true,
+    contentType: 'text/plain; charset=utf-8',
+    headers: {}
+  };
+
+  if (config.user) {
+    options.headers['X-ClickHouse-User'] = config.user;
+  }
+  if (config.pass) {
+    options.headers['X-ClickHouse-Key'] = config.pass;
+  }
+
+  const resp = UrlFetchApp.fetch(url, options);
+  const code = resp.getResponseCode();
+  const text = resp.getContentText();
+  if (code < 200 || code >= 300) {
+    throw new Error(`ClickHouse HTTP query lỗi (${code}): ${text}`);
+  }
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 function getAccountData() {
   const config = getConfigMap();
   const dbs = parseDatabases(config.databases);
@@ -226,21 +266,28 @@ function getAccountData() {
   const driver = getDriver(config);
   const db = dbs[0];
   const query = config.account_query || getDefaultAccountQuery(driver);
-  const conn = openJdbcConnection(config, db);
+  let account = '';
 
-  try {
-    const account = readSingleValueQuery(conn, query);
-    toA1JsonSheet(ACCOUNT_SHEET, {
-      host: config.host,
-      driver,
-      database: db,
-      account,
-      fetched_at: new Date().toISOString()
-    });
-    SpreadsheetApp.getActive().toast('Đã lấy dữ liệu account thành công.');
-  } finally {
-    conn.close();
+  if (driver === 'clickhouse') {
+    const rows = clickhouseQueryRows(config, db, query);
+    account = rows.length ? String(Object.values(rows[0])[0] || '') : '';
+  } else {
+    const conn = openJdbcConnection(config, db);
+    try {
+      account = readSingleValueQuery(conn, query);
+    } finally {
+      conn.close();
+    }
   }
+
+  toA1JsonSheet(ACCOUNT_SHEET, {
+    host: config.host,
+    driver,
+    database: db,
+    account,
+    fetched_at: new Date().toISOString()
+  });
+  SpreadsheetApp.getActive().toast('Đã lấy dữ liệu account thành công.');
 }
 
 function fetchColumnsForTableDefault(conn, schemaName, tableName) {
@@ -261,37 +308,6 @@ function fetchColumnsForTableDefault(conn, schemaName, tableName) {
     if (String(rs.getString('is_nullable')).toUpperCase() === 'NO') constraints.push('NOT NULL');
     if (rs.getString('column_default') !== null) constraints.push(`DEFAULT ${rs.getString('column_default')}`);
     columns.push({ name: rs.getString('column_name'), data_type: rs.getString('data_type'), constraints });
-  }
-
-  rs.close();
-  stmt.close();
-  return columns;
-}
-
-function fetchColumnsForTableClickHouse(conn, schemaName, tableName) {
-  const sql = `
-    SELECT name, type, default_kind, default_expression
-    FROM system.columns
-    WHERE database = ? AND table = ?
-    ORDER BY position
-  `;
-  const stmt = conn.prepareStatement(sql);
-  stmt.setString(1, schemaName);
-  stmt.setString(2, tableName);
-  const rs = stmt.executeQuery();
-
-  const columns = [];
-  while (rs.next()) {
-    const constraints = [];
-    const defaultKind = rs.getString('default_kind');
-    const defaultExpr = rs.getString('default_expression');
-    if (defaultKind && defaultExpr) constraints.push(`DEFAULT ${defaultExpr}`);
-
-    columns.push({
-      name: rs.getString('name'),
-      data_type: rs.getString('type'),
-      constraints
-    });
   }
 
   rs.close();
@@ -336,38 +352,57 @@ function fetchConstraintsForTableDefault(conn, schemaName, tableName) {
   return { tableConstraints, relationships };
 }
 
-function fetchConstraintsForTableClickHouse(conn, schemaName, tableName) {
-  const sql = `
-    SELECT engine_full
-    FROM system.tables
-    WHERE database = ? AND name = ?
-    LIMIT 1
-  `;
-  const stmt = conn.prepareStatement(sql);
-  stmt.setString(1, schemaName);
-  stmt.setString(2, tableName);
-  const rs = stmt.executeQuery();
+function fetchTablesForDatabaseViaClickHouseHttp(config, databaseName) {
+  const tableRows = clickhouseQueryRows(
+    config,
+    databaseName,
+    `SELECT name AS table_name, engine_full FROM system.tables WHERE database = '${databaseName.replace(/'/g, "''")}' ORDER BY name`
+  );
 
-  const tableConstraints = [];
-  if (rs.next()) {
-    const engine = rs.getString('engine_full');
-    if (engine) tableConstraints.push(`ENGINE ${engine}`);
-  }
+  const tables = [];
+  tableRows.forEach((row) => {
+    const tableName = row.table_name;
+    const colRows = clickhouseQueryRows(
+      config,
+      databaseName,
+      `SELECT name, type, default_kind, default_expression
+       FROM system.columns
+       WHERE database = '${databaseName.replace(/'/g, "''")}' AND table = '${String(tableName).replace(/'/g, "''")}'
+       ORDER BY position`
+    );
 
-  rs.close();
-  stmt.close();
-  return { tableConstraints, relationships: [] };
+    const columns = colRows.map((c) => {
+      const constraints = [];
+      if (c.default_kind && c.default_expression) constraints.push(`DEFAULT ${c.default_expression}`);
+      return {
+        name: c.name,
+        data_type: c.type,
+        constraints
+      };
+    });
+
+    const tableConstraints = [];
+    if (row.engine_full) tableConstraints.push(`ENGINE ${row.engine_full}`);
+
+    tables.push({
+      name: tableName,
+      source_file: `${databaseName}.clickhouse_http`,
+      columns,
+      table_constraints: tableConstraints,
+      relationships: [],
+      sample_data_examples: [],
+      business_logic_notes: []
+    });
+  });
+
+  return tables;
 }
 
-function fetchTablesForDatabase(config, databaseName) {
-  const driver = getDriver(config);
+function fetchTablesForDatabaseViaJdbc(config, databaseName) {
   const conn = openJdbcConnection(config, databaseName);
 
   try {
-    const tableSql = driver === 'clickhouse'
-      ? `SELECT name AS table_name FROM system.tables WHERE database = ? ORDER BY name`
-      : `SELECT table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name`;
-
+    const tableSql = `SELECT table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name`;
     const stmt = conn.prepareStatement(tableSql);
     stmt.setString(1, databaseName);
     const rs = stmt.executeQuery();
@@ -375,16 +410,12 @@ function fetchTablesForDatabase(config, databaseName) {
     const tables = [];
     while (rs.next()) {
       const tableName = rs.getString('table_name');
-      const columns = driver === 'clickhouse'
-        ? fetchColumnsForTableClickHouse(conn, databaseName, tableName)
-        : fetchColumnsForTableDefault(conn, databaseName, tableName);
-      const constraintsData = driver === 'clickhouse'
-        ? fetchConstraintsForTableClickHouse(conn, databaseName, tableName)
-        : fetchConstraintsForTableDefault(conn, databaseName, tableName);
+      const columns = fetchColumnsForTableDefault(conn, databaseName, tableName);
+      const constraintsData = fetchConstraintsForTableDefault(conn, databaseName, tableName);
 
       tables.push({
         name: tableName,
-        source_file: `${databaseName}.${driver}`,
+        source_file: `${databaseName}.jdbc`,
         columns,
         table_constraints: constraintsData.tableConstraints,
         relationships: constraintsData.relationships,
@@ -399,6 +430,14 @@ function fetchTablesForDatabase(config, databaseName) {
   } finally {
     conn.close();
   }
+}
+
+function fetchTablesForDatabase(config, databaseName) {
+  const driver = getDriver(config);
+  if (driver === 'clickhouse') {
+    return fetchTablesForDatabaseViaClickHouseHttp(config, databaseName);
+  }
+  return fetchTablesForDatabaseViaJdbc(config, databaseName);
 }
 
 function flattenMetadataRows(schema) {
@@ -505,6 +544,7 @@ if (typeof module !== 'undefined') {
     parseDatabases,
     getDriver,
     buildJdbcUrl,
+    buildClickHouseHttpUrl,
     getDefaultAccountQuery,
     flattenMetadataRows
   };
