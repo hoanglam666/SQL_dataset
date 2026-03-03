@@ -4,6 +4,7 @@ const {
   parseCreateTables,
   buildSchemaFromRows,
   parseDatabases,
+  resolveDatabases,
   buildJdbcUrl,
   buildClickHouseHttpUrl,
   validateClickHouseConfig,
@@ -64,10 +65,12 @@ const {
   const chEndpoint = buildClickHouseHttpUrl({ endpoint: 'https://proxy.company.com:8443' }, 'warehouse');
   assert.strictEqual(chEndpoint, 'https://proxy.company.com:8443/?database=warehouse');
 
-  assert.throws(
-    () => validateClickHouseConfig({ protocol: 'http', port: '32015' }),
-    /Port ClickHouse hiện tại là 32015/
-  );
+  const chHostAsUrl = buildClickHouseHttpUrl({ host: 'http://103.104.122.217:32015' }, 'kfm_scm');
+  assert.strictEqual(chHostAsUrl, 'http://103.104.122.217:32015/?database=kfm_scm');
+
+  assert.deepStrictEqual(resolveDatabases({ databases: '', database: 'kfm_scm' }), ['kfm_scm']);
+
+  assert.doesNotThrow(() => validateClickHouseConfig({ protocol: 'http', port: '32015', host: 'http://103.104.122.217:32015' }));
 
   assert.strictEqual(getDefaultAccountQuery('clickhouse'), 'SELECT currentUser() AS account');
 

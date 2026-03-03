@@ -32,6 +32,7 @@ function setupConfigSheet() {
     ['host', '127.0.0.1', 'DB host'],
     ['port', '8123', 'MySQL=3306, Postgres=5432, ClickHouse HTTP=8123/8443'],
     ['databases', 'default', 'Danh sách DB, phân tách bằng dấu phẩy'],
+    ['database', '', 'Tuỳ chọn: 1 DB duy nhất (fallback nếu databases rỗng)'],
     ['user', 'default', 'DB user'],
     ['pass', '', 'DB password'],
     ['driver', 'clickhouse', 'mysql | postgres | clickhouse'],
@@ -156,6 +157,14 @@ function parseDatabases(raw) {
   return String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+function resolveDatabases(config) {
+  const fromPlural = parseDatabases(config.databases);
+  if (fromPlural.length) return fromPlural;
+
+  const fromSingle = String(config.database || '').trim();
+  return fromSingle ? [fromSingle] : [];
+}
+
 function getConfigMap() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG_SHEET);
@@ -197,25 +206,36 @@ function buildClickHouseHttpUrl(config, databaseName) {
     return `${clean}/?database=${encodeURIComponent(databaseName)}`;
   }
 
-  const host = config.host;
-  if (!host) throw new Error("Config thiếu 'host'.");
+  const hostRaw = String(config.host || '').trim();
+  if (!hostRaw) throw new Error("Config thiếu 'host'.");
+
+  // Cho phép nhập host đầy đủ như: http://103.104.122.217:32015
+  if (/^https?:\/\//i.test(hostRaw)) {
+    const clean = hostRaw.replace(/\/$/, '');
+    return `${clean}/?database=${encodeURIComponent(databaseName)}`;
+  }
+
   const protocol = String(config.protocol || 'http').toLowerCase();
   const port = config.port || (protocol === 'https' ? '8443' : '8123');
-  return `${protocol}://${host}:${port}/?database=${encodeURIComponent(databaseName)}`;
+  return `${protocol}://${hostRaw}:${port}/?database=${encodeURIComponent(databaseName)}`;
 }
 
 function validateClickHouseConfig(config) {
+  const endpoint = String(config.endpoint || '').trim();
+  const hostRaw = String(config.host || '').trim();
+  if (!endpoint && !hostRaw) {
+    throw new Error("Config ClickHouse thiếu host/endpoint.");
+  }
+
   const protocol = String(config.protocol || 'http').toLowerCase();
   const port = String(config.port || (protocol === 'https' ? '8443' : '8123'));
-
   if (port !== '8123' && port !== '8443') {
-    throw new Error(
-      `Port ClickHouse hiện tại là ${port}. Apps Script chỉ gọi được ClickHouse qua HTTP API (thường 8123/8443). ` +
-      'Port 32015 thường là native TCP hoặc private gateway nên Google Apps Script không truy cập được. ' +
-      'Hãy mở HTTP endpoint công khai hoặc điền config.endpoint (vd: https://<host>:8443).'
-    );
+    if (typeof Logger !== 'undefined') {
+      Logger.log(`Cảnh báo: đang dùng port ClickHouse không chuẩn HTTP (8123/8443): ${port}. Nếu chạy được thì giữ nguyên config hiện tại.`);
+    }
   }
 }
+
 
 function getDefaultAccountQuery(driver) {
   if (driver === 'clickhouse') return 'SELECT currentUser() AS account';
@@ -296,8 +316,8 @@ FORMAT JSONEachRow`;
 
 function getAccountData() {
   const config = getConfigMap();
-  const dbs = parseDatabases(config.databases);
-  if (!dbs.length) throw new Error("Config 'databases' rỗng.");
+  const dbs = resolveDatabases(config);
+  if (!dbs.length) throw new Error("Config thiếu 'databases' hoặc 'database'.");
 
   const driver = getDriver(config);
   const db = dbs[0];
@@ -510,8 +530,8 @@ function writeMetadataTableSheet(schema) {
 
 function getSchemaMetadataFromDatabase() {
   const config = getConfigMap();
-  const dbs = parseDatabases(config.databases);
-  if (!dbs.length) throw new Error("Config 'databases' rỗng.");
+  const dbs = resolveDatabases(config);
+  if (!dbs.length) throw new Error("Config thiếu 'databases' hoặc 'database'.");
 
   const allTables = [];
   dbs.forEach((db) => allTables.push(...fetchTablesForDatabase(config, db)));
@@ -578,6 +598,7 @@ if (typeof module !== 'undefined') {
     parseCreateTables,
     buildSchemaFromRows,
     parseDatabases,
+    resolveDatabases,
     getDriver,
     buildJdbcUrl,
     buildClickHouseHttpUrl,

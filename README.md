@@ -14,6 +14,7 @@ Chạy hàm `setupConfigSheet()` hoặc mở file sheet để menu tự tạo. S
 - `host`
 - `port`
 - `databases` (nhiều DB, cách nhau bởi dấu phẩy)
+- `database` (tuỳ chọn, 1 DB; dùng khi không khai báo `databases`)
 - `user`
 - `pass`
 - `driver` (`mysql`, `postgres`, `clickhouse`)
@@ -27,8 +28,8 @@ Apps Script `Jdbc` **không hỗ trợ** `jdbc:clickhouse://...`, vì vậy tool
 
 Ví dụ config:
 
-- `host`: `103.104.xxx.xxx`
-- `port`: `8123` (hoặc `8443` nếu SSL)
+- `host`: `http://103.104.122.217:32015` *(hỗ trợ host dạng URL đầy đủ như bạn đang dùng)*
+- `port`: *(có thể bỏ trống nếu host đã chứa port)*
 - `databases`: `kfm_scm,kdb`
 - `user`: `scm_iam`
 - `pass`: `***`
@@ -50,9 +51,10 @@ thì thường là do:
 
 Cách xử lý:
 
-1. Dùng cổng HTTP ClickHouse: `8123` hoặc HTTPS `8443`.
-2. Hoặc khai báo `endpoint` trỏ tới reverse proxy/public endpoint.
-3. Đảm bảo firewall cho phép truy cập từ Google Apps Script.
+1. Có thể nhập trực tiếp `host` dạng URL đầy đủ (ví dụ `http://103.104.122.217:32015`).
+2. Hoặc dùng cặp `host` + `port` truyền thống (`8123`/`8443` thường gặp).
+3. Hoặc khai báo `endpoint` trỏ tới reverse proxy/public endpoint.
+4. Đảm bảo firewall cho phép truy cập từ Google Apps Script.
 
 ## 4) Nút hàm / menu để chạy
 
