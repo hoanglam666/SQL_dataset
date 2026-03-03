@@ -5,6 +5,9 @@ const {
   buildSchemaFromRows,
   parseDatabases,
   resolveDatabases,
+  toBool,
+  extractHostFromUrl,
+  isLikelyPrivateOrVpnHost,
   buildJdbcUrl,
   buildClickHouseHttpUrl,
   validateClickHouseConfig,
@@ -70,7 +73,19 @@ const {
 
   assert.deepStrictEqual(resolveDatabases({ databases: '', database: 'kfm_scm' }), ['kfm_scm']);
 
+
+  assert.strictEqual(toBool('true'), true);
+  assert.strictEqual(toBool('FALSE'), false);
+  assert.strictEqual(extractHostFromUrl('http://103.104.122.217:32015'), '103.104.122.217');
+  assert.strictEqual(isLikelyPrivateOrVpnHost('10.99.0.11'), true);
+  assert.strictEqual(isLikelyPrivateOrVpnHost('103.104.122.217'), false);
+
   assert.doesNotThrow(() => validateClickHouseConfig({ protocol: 'http', port: '32015', host: 'http://103.104.122.217:32015' }));
+
+  assert.throws(
+    () => validateClickHouseConfig({ vpn_required: 'true', host: '10.99.0.11' }),
+    /vpn_required=true/
+  );
 
   assert.strictEqual(getDefaultAccountQuery('clickhouse'), 'SELECT currentUser() AS account');
 

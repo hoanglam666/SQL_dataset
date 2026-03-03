@@ -20,6 +20,8 @@ Chạy hàm `setupConfigSheet()` hoặc mở file sheet để menu tự tạo. S
 - `driver` (`mysql`, `postgres`, `clickhouse`)
 - `protocol` (`http` hoặc `https`, dùng cho ClickHouse)
 - `endpoint` (tuỳ chọn, URL ClickHouse đầy đủ, ví dụ `https://proxy.company.com:8443`)
+- `vpn_required` (`true/false`; bật khi DB chỉ nằm trong mạng VPN nội bộ)
+- `relay_endpoint` (tuỳ chọn; HTTPS relay/proxy public có route vào VPN)
 - `account_query` (để trống sẽ tự dùng default theo driver)
 
 ## 2) Cấu hình ClickHouse (khắc phục lỗi unsupported JDBC protocol)
@@ -37,7 +39,33 @@ Ví dụ config:
 - `protocol`: `http`
 
 
-## 3) Xử lý lỗi `Address unavailable`
+
+## 3) Cấu hình VPN theo WireGuard config
+
+Với config kiểu như bạn gửi (WireGuard private network), lưu ý quan trọng:
+
+- **Google Apps Script không chạy trong WireGuard client trên máy cá nhân**.
+- Vì vậy nếu DB chỉ mở trong VPN nội bộ (ví dụ dải `10.99.0.0/24`), Apps Script sẽ không vào trực tiếp được trừ khi có relay/proxy public.
+
+### Cách điền config đề xuất
+
+- `driver`: `clickhouse`
+- `vpn_required`: `true`
+- `database`: `kfm_scm`
+- `user`: `scm_lam`
+- `pass`: `xukco1-roghaB-fuqfum`
+
+**Option A (đúng theo case bạn đang chạy được):**
+- `host`: `http://103.104.122.217:32015`
+- `relay_endpoint`: để trống
+
+**Option B (khi host private không truy cập được từ Apps Script):**
+- `host`: `10.99.0.11` (hoặc private IP)
+- `relay_endpoint`: `https://<your-relay-domain>`
+
+`relay_endpoint` sẽ được ưu tiên dùng trước `endpoint/host`.
+
+## 4) Xử lý lỗi `Address unavailable`
 
 Nếu gặp lỗi như:
 
@@ -56,7 +84,7 @@ Cách xử lý:
 3. Hoặc khai báo `endpoint` trỏ tới reverse proxy/public endpoint.
 4. Đảm bảo firewall cho phép truy cập từ Google Apps Script.
 
-## 4) Nút hàm / menu để chạy
+## 5) Nút hàm / menu để chạy
 
 Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh:
 
@@ -68,21 +96,21 @@ Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh
 
 > Có thể gán các hàm này vào button (Insert → Drawing → Assign script).
 
-## 5) Output sheets
+## 6) Output sheets
 
 - `account_output!A1`: JSON account lấy từ DB
 - `schema_output!A1`: JSON metadata schema
 - `metadata_tables`: bảng metadata dạng phẳng để filter/tra cứu
 - `json_import!A1`: nơi dán JSON để chạy `updateMetadataFromJson()`
 
-## 6) Lưu kết quả vào file JSON
+## 7) Lưu kết quả vào file JSON
 
 Chạy `saveMetadataJsonToDrive()` để tạo file:
 
 - Tên file: `schema_metadata_<timestamp>.json`
 - Vị trí: Google Drive của tài khoản chạy script
 
-## 7) Parse SQL thủ công từ sheet `sql_input`
+## 8) Parse SQL thủ công từ sheet `sql_input`
 
 Nếu không kết nối DB, bạn vẫn có thể nhập SQL vào `sql_input`:
 

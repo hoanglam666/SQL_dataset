@@ -38,6 +38,8 @@ function setupConfigSheet() {
     ['driver', 'clickhouse', 'mysql | postgres | clickhouse'],
     ['protocol', 'http', 'http | https (cho clickhouse HTTP API)'],
     ['endpoint', '', 'Tuỳ chọn: URL ClickHouse đầy đủ, ví dụ https://host:8443'],
+    ['vpn_required', 'false', 'true/false - DB chỉ truy cập qua VPN private network'],
+    ['relay_endpoint', '', 'Tuỳ chọn: HTTPS relay/proxy public có route vào VPN'],
     ['account_query', '', 'Để trống để dùng default theo driver']
   ];
 
@@ -165,6 +167,37 @@ function resolveDatabases(config) {
   return fromSingle ? [fromSingle] : [];
 }
 
+
+function toBool(value) {
+  return String(value || '').toLowerCase().trim() === 'true';
+}
+
+function extractHostFromUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const m = text.match(/^https?:\/\/([^/:?#]+)/i);
+  return m ? m[1] : text;
+}
+
+function isLikelyPrivateOrVpnHost(raw) {
+  const host = extractHostFromUrl(raw);
+  if (!host) return false;
+
+  if (host === 'localhost' || host === '127.0.0.1') return true;
+
+  const octets = host.split('.').map((n) => Number(n));
+  if (octets.length !== 4 || octets.some((n) => Number.isNaN(n))) return false;
+
+  const [a, b] = octets;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+
+  // dải VPN trong ảnh user gửi: 10.99.0.0/24
+  if (a === 10 && b === 99) return true;
+  return false;
+}
+
 function getConfigMap() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG_SHEET);
@@ -200,6 +233,12 @@ function buildJdbcUrl(config, databaseName) {
 }
 
 function buildClickHouseHttpUrl(config, databaseName) {
+  const relayEndpoint = String(config.relay_endpoint || '').trim();
+  if (relayEndpoint) {
+    const cleanRelay = relayEndpoint.replace(/\/$/, '');
+    return `${cleanRelay}/?database=${encodeURIComponent(databaseName)}`;
+  }
+
   const endpoint = String(config.endpoint || '').trim();
   if (endpoint) {
     const clean = endpoint.replace(/\/$/, '');
@@ -222,9 +261,19 @@ function buildClickHouseHttpUrl(config, databaseName) {
 
 function validateClickHouseConfig(config) {
   const endpoint = String(config.endpoint || '').trim();
+  const relayEndpoint = String(config.relay_endpoint || '').trim();
   const hostRaw = String(config.host || '').trim();
-  if (!endpoint && !hostRaw) {
-    throw new Error("Config ClickHouse thiếu host/endpoint.");
+  const vpnRequired = toBool(config.vpn_required);
+
+  if (!endpoint && !hostRaw && !relayEndpoint) {
+    throw new Error("Config ClickHouse thiếu host/endpoint/relay_endpoint.");
+  }
+
+  if (vpnRequired && !relayEndpoint) {
+    throw new Error(
+      'Config đang bật vpn_required=true nhưng chưa có relay_endpoint. ' +
+      'Google Apps Script không chạy trong WireGuard client của bạn, nên cần HTTPS relay/proxy public để vào mạng VPN nội bộ.'
+    );
   }
 
   const protocol = String(config.protocol || 'http').toLowerCase();
@@ -234,7 +283,14 @@ function validateClickHouseConfig(config) {
       Logger.log(`Cảnh báo: đang dùng port ClickHouse không chuẩn HTTP (8123/8443): ${port}. Nếu chạy được thì giữ nguyên config hiện tại.`);
     }
   }
+
+  if (!relayEndpoint && isLikelyPrivateOrVpnHost(endpoint || hostRaw)) {
+    if (typeof Logger !== 'undefined') {
+      Logger.log('Phát hiện host private/VPN. Nếu Apps Script lỗi Address unavailable, hãy dùng relay_endpoint HTTPS có route vào VPN.');
+    }
+  }
 }
+
 
 
 function getDefaultAccountQuery(driver) {
@@ -599,6 +655,9 @@ if (typeof module !== 'undefined') {
     buildSchemaFromRows,
     parseDatabases,
     resolveDatabases,
+    toBool,
+    extractHostFromUrl,
+    isLikelyPrivateOrVpnHost,
     getDriver,
     buildJdbcUrl,
     buildClickHouseHttpUrl,
