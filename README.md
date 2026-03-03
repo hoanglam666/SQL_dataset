@@ -18,6 +18,7 @@ Chạy hàm `setupConfigSheet()` hoặc mở file sheet để menu tự tạo. S
 - `pass`
 - `driver` (`mysql`, `postgres`, `clickhouse`)
 - `protocol` (`http` hoặc `https`, dùng cho ClickHouse)
+- `endpoint` (tuỳ chọn, URL ClickHouse đầy đủ, ví dụ `https://proxy.company.com:8443`)
 - `account_query` (để trống sẽ tự dùng default theo driver)
 
 ## 2) Cấu hình ClickHouse (khắc phục lỗi unsupported JDBC protocol)
@@ -34,7 +35,26 @@ Ví dụ config:
 - `driver`: `clickhouse`
 - `protocol`: `http`
 
-## 3) Nút hàm / menu để chạy
+
+## 3) Xử lý lỗi `Address unavailable`
+
+Nếu gặp lỗi như:
+
+`Exception: Address unavailable: http://103.104.122.217:32015/?database=kfm_scm`
+
+thì thường là do:
+
+- Đang dùng cổng không phải HTTP API của ClickHouse (32015 thường là native TCP/private gateway)
+- Host/port chỉ mở nội bộ và Google Apps Script không truy cập được
+- Firewall/security group chặn IP egress của Google
+
+Cách xử lý:
+
+1. Dùng cổng HTTP ClickHouse: `8123` hoặc HTTPS `8443`.
+2. Hoặc khai báo `endpoint` trỏ tới reverse proxy/public endpoint.
+3. Đảm bảo firewall cho phép truy cập từ Google Apps Script.
+
+## 4) Nút hàm / menu để chạy
 
 Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh:
 
@@ -46,21 +66,21 @@ Khi mở sheet, menu **SQL Metadata Tools** sẽ xuất hiện với các lệnh
 
 > Có thể gán các hàm này vào button (Insert → Drawing → Assign script).
 
-## 4) Output sheets
+## 5) Output sheets
 
 - `account_output!A1`: JSON account lấy từ DB
 - `schema_output!A1`: JSON metadata schema
 - `metadata_tables`: bảng metadata dạng phẳng để filter/tra cứu
 - `json_import!A1`: nơi dán JSON để chạy `updateMetadataFromJson()`
 
-## 5) Lưu kết quả vào file JSON
+## 6) Lưu kết quả vào file JSON
 
 Chạy `saveMetadataJsonToDrive()` để tạo file:
 
 - Tên file: `schema_metadata_<timestamp>.json`
 - Vị trí: Google Drive của tài khoản chạy script
 
-## 6) Parse SQL thủ công từ sheet `sql_input`
+## 7) Parse SQL thủ công từ sheet `sql_input`
 
 Nếu không kết nối DB, bạn vẫn có thể nhập SQL vào `sql_input`:
 

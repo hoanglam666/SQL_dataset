@@ -36,6 +36,7 @@ function setupConfigSheet() {
     ['pass', '', 'DB password'],
     ['driver', 'clickhouse', 'mysql | postgres | clickhouse'],
     ['protocol', 'http', 'http | https (cho clickhouse HTTP API)'],
+    ['endpoint', '', 'Tuỳ chọn: URL ClickHouse đầy đủ, ví dụ https://host:8443'],
     ['account_query', '', 'Để trống để dùng default theo driver']
   ];
 
@@ -190,11 +191,30 @@ function buildJdbcUrl(config, databaseName) {
 }
 
 function buildClickHouseHttpUrl(config, databaseName) {
+  const endpoint = String(config.endpoint || '').trim();
+  if (endpoint) {
+    const clean = endpoint.replace(/\/$/, '');
+    return `${clean}/?database=${encodeURIComponent(databaseName)}`;
+  }
+
   const host = config.host;
   if (!host) throw new Error("Config thiếu 'host'.");
   const protocol = String(config.protocol || 'http').toLowerCase();
   const port = config.port || (protocol === 'https' ? '8443' : '8123');
   return `${protocol}://${host}:${port}/?database=${encodeURIComponent(databaseName)}`;
+}
+
+function validateClickHouseConfig(config) {
+  const protocol = String(config.protocol || 'http').toLowerCase();
+  const port = String(config.port || (protocol === 'https' ? '8443' : '8123'));
+
+  if (port !== '8123' && port !== '8443') {
+    throw new Error(
+      `Port ClickHouse hiện tại là ${port}. Apps Script chỉ gọi được ClickHouse qua HTTP API (thường 8123/8443). ` +
+      'Port 32015 thường là native TCP hoặc private gateway nên Google Apps Script không truy cập được. ' +
+      'Hãy mở HTTP endpoint công khai hoặc điền config.endpoint (vd: https://<host>:8443).'
+    );
+  }
 }
 
 function getDefaultAccountQuery(driver) {
@@ -226,8 +246,10 @@ function readSingleValueQuery(conn, sql) {
 }
 
 function clickhouseQueryRows(config, databaseName, sql) {
+  validateClickHouseConfig(config);
   const url = buildClickHouseHttpUrl(config, databaseName);
-  const query = `${sql}\nFORMAT JSONEachRow`;
+  const query = `${sql}
+FORMAT JSONEachRow`;
 
   const options = {
     method: 'post',
@@ -244,11 +266,25 @@ function clickhouseQueryRows(config, databaseName, sql) {
     options.headers['X-ClickHouse-Key'] = config.pass;
   }
 
-  const resp = UrlFetchApp.fetch(url, options);
+  let resp;
+  try {
+    resp = UrlFetchApp.fetch(url, options);
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (msg.includes('Address unavailable')) {
+      throw new Error(
+        `Không truy cập được ClickHouse endpoint: ${url}. ` +
+        'Nguyên nhân thường gặp: host/port chỉ mở nội bộ, firewall chặn Google Apps Script, hoặc đang dùng native TCP thay vì HTTP. ' +
+        'Hãy dùng cổng 8123/8443 hoặc endpoint HTTPS public qua reverse proxy/VPN bridge.'
+      );
+    }
+    throw err;
+  }
+
   const code = resp.getResponseCode();
   const text = resp.getContentText();
   if (code < 200 || code >= 300) {
-    throw new Error(`ClickHouse HTTP query lỗi (${code}): ${text}`);
+    throw new Error(`ClickHouse HTTP query lỗi (${code}) tại ${url}: ${text}`);
   }
 
   return text
@@ -545,6 +581,7 @@ if (typeof module !== 'undefined') {
     getDriver,
     buildJdbcUrl,
     buildClickHouseHttpUrl,
+    validateClickHouseConfig,
     getDefaultAccountQuery,
     flattenMetadataRows
   };

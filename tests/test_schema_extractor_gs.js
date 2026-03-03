@@ -6,6 +6,7 @@ const {
   parseDatabases,
   buildJdbcUrl,
   buildClickHouseHttpUrl,
+  validateClickHouseConfig,
   getDefaultAccountQuery,
   flattenMetadataRows
 } = require('../schema_extractor.gs');
@@ -59,6 +60,14 @@ const {
 
   const chHttp = buildClickHouseHttpUrl({ host: 'ch.local', port: '8123', protocol: 'http' }, 'warehouse');
   assert.strictEqual(chHttp, 'http://ch.local:8123/?database=warehouse');
+
+  const chEndpoint = buildClickHouseHttpUrl({ endpoint: 'https://proxy.company.com:8443' }, 'warehouse');
+  assert.strictEqual(chEndpoint, 'https://proxy.company.com:8443/?database=warehouse');
+
+  assert.throws(
+    () => validateClickHouseConfig({ protocol: 'http', port: '32015' }),
+    /Port ClickHouse hiện tại là 32015/
+  );
 
   assert.strictEqual(getDefaultAccountQuery('clickhouse'), 'SELECT currentUser() AS account');
 
