@@ -1,0 +1,81 @@
+{
+  "scanned_files": 1,
+  "tables": [
+    {
+      "name": "customers",
+      "source_file": "sample_schema.sql",
+      "columns": [
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "constraints": [
+            "PRIMARY KEY"
+          ]
+        },
+        {
+          "name": "full_name",
+          "data_type": "VARCHAR(100)",
+          "constraints": [
+            "NOT NULL"
+          ]
+        },
+        {
+          "name": "city",
+          "data_type": "VARCHAR(100)",
+          "constraints": []
+        },
+        {
+          "name": "created_at",
+          "data_type": "TIMESTAMP",
+          "constraints": [
+            "DEFAULT CURRENT_TIMESTAMP"
+          ]
+        }
+      ],
+      "table_constraints": [],
+      "relationships": [],
+      "sample_data_examples": [],
+      "business_logic_notes": []
+    },
+    {
+      "name": "invoices",
+      "source_file": "sample_schema.sql",
+      "columns": [
+        {
+          "name": "invoice_id",
+          "data_type": "INT",
+          "constraints": [
+            "PRIMARY KEY"
+          ]
+        },
+        {
+          "name": "customer_id",
+          "data_type": "INT",
+          "constraints": [
+            "NOT NULL"
+          ]
+        },
+        {
+          "name": "total_amount",
+          "data_type": "DECIMAL(12,2)",
+          "constraints": [
+            "NOT NULL"
+          ]
+        },
+        {
+          "name": "issued_date",
+          "data_type": "DATE",
+          "constraints": []
+        }
+      ],
+      "table_constraints": [
+        "CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers(customer_id)"
+      ],
+      "relationships": [
+        "CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers(customer_id)"
+      ],
+      "sample_data_examples": [],
+      "business_logic_notes": []
+    }
+  ]
+}
